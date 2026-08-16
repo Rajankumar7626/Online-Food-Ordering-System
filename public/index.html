@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#17130F">
+<meta name="description" content="Eatsy — order from the best restaurants in town. Live order tracking, quick delivery, and a kitchen you can trust.">
+<title>Eatsy — Food, delivered.</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23FF5A1F'/%3E%3Cpath d='M20 14h10v18h14v4H20z' fill='%23fff'/%3E%3Ccircle cx='24' cy='44' r='3.4' fill='%23fff'/%3E%3Ccircle cx='43' cy='44' r='3.4' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<header class="nav" id="nav">
+  <div class="nav-inner">
+    <a href="#/" class="brand" id="brandLink" aria-label="Eatsy home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" width="30" height="30"><rect width="64" height="64" rx="16" fill="currentColor"/><path d="M20 14h10v18h14v4H20z" fill="#fff"/><circle cx="24" cy="44" r="3.4" fill="#fff"/><circle cx="43" cy="44" r="3.4" fill="#fff"/></svg>
+      </span>
+      <span class="brand-word">eatsy<em>.</em></span>
+    </a>
+
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#/" data-nav>Restaurants</a>
+      <a href="#/orders" data-nav>My Orders</a>
+      <a href="#/admin" data-nav id="adminNav" hidden>Admin</a>
+    </nav>
+
+    <div class="nav-right">
+      <button class="btn btn-ghost cart-btn" id="cartBtn" aria-label="Open cart">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/><path d="M2.5 3h2l2.6 12.4a2 2 0 0 0 2 1.6h9.1a2 2 0 0 0 2-1.6L22 7H6"/></svg>
+        <span class="cart-badge" id="cartBadge" hidden>0</span>
+      </button>
+      <div class="user-area" id="userArea"></div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ ROUTER OUTLET ============ -->
+<main id="view" tabindex="-1"></main>
+
+<!-- ============ FOOTER ============ -->
+<footer class="foot">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">eatsy<em>.</em></div>
+        <p class="foot-note">Full-stack demo: Express · SQLite · vanilla SPA.<br>Payments are simulated — no real charges.</p>
+      </div>
+      <div class="foot-links">
+        <a href="#/">Restaurants</a>
+        <a href="#/orders">Track order</a>
+        <a href="#/admin">Admin</a>
+      </div>
+    </div>
+    <p class="foot-copy">© 2026 Eatsy — made with ❤️ and hunger.</p>
+  </div>
+</footer>
+
+<!-- ============ CART DRAWER ============ -->
+<div class="scrim" id="cartScrim" hidden></div>
+<aside class="drawer" id="cartDrawer" aria-label="Shopping cart" aria-hidden="true">
+  <div class="drawer-head">
+    <h2>Your cart</h2>
+    <button class="btn-icon" id="cartClose" aria-label="Close cart">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body" id="cartBody"></div>
+  <div class="drawer-foot" id="cartFoot" hidden>
+    <div class="cart-total-row"><span>Subtotal</span><b id="cartSubtotal">₹0</b></div>
+    <div class="cart-total-row dim"><span>Delivery</span><b id="cartDelivery">—</b></div>
+    <div class="cart-total-row dim"><span>GST (5%)</span><b id="cartTax">—</b></div>
+    <div class="cart-total-row big"><span>Total</span><b id="cartTotal">₹0</b></div>
+    <a class="btn btn-brand btn-block" id="cartCheckout" href="#/checkout">Checkout →</a>
+  </div>
+</aside>
+
+<!-- ============ TOASTS ============ -->
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!-- ============ MODAL ROOT ============ -->
+<div id="modalRoot"></div>
+
+<script src="/js/api.js"></script>
+<script src="/js/ui.js"></script>
+<script src="/js/app.js"></script>
+<script src="/js/views.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>
