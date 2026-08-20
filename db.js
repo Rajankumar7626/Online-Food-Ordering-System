@@ -8,10 +8,13 @@ const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 
-const dir = path.join(__dirname, 'data');
+const databasePath = process.env.SQLITE_PATH
+  ? path.resolve(process.env.SQLITE_PATH)
+  : path.join(__dirname, 'data', 'eatsy.db');
+const dir = path.dirname(databasePath);
 fs.mkdirSync(dir, { recursive: true });
 
-const db = new Database(path.join(dir, 'eatsy.db'));
+const db = new Database(databasePath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 

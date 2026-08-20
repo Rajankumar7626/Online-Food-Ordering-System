@@ -4,10 +4,13 @@
 const API = {
   async req(method, url, body) {
     let res;
+    const headers = body ? { 'Content-Type': 'application/json' } : {};
+    const csrf = document.cookie.split(';').map(s => s.trim()).find(s => s.startsWith('csrf='));
+    if (csrf) headers['X-CSRF-Token'] = decodeURIComponent(csrf.slice(5));
     try {
       res = await fetch(url, {
         method,
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        headers,
         body: body ? JSON.stringify(body) : undefined,
         credentials: 'same-origin'
       });

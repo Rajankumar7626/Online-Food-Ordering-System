@@ -553,18 +553,9 @@ const Views = (() => {
           <div class="field"><label for="lEmail">Email</label><input id="lEmail" type="email" placeholder="you@example.com"></div>
           <div class="field"><label for="lPass">Password</label><input id="lPass" type="password" placeholder="••••••••"></div>
           <button class="btn btn-brand btn-block" id="loginBtn">Sign in →</button>
-          <div class="demo-box">
-            <b>Demo accounts</b>
-            <div class="row"><span>Customer</span><code>demo@eatsy.in / demo123</code><button class="btn btn-sm btn-soft" data-fill="demo">Use</button></div>
-            <div class="row"><span>Admin</span><code>admin@eatsy.in / admin123</code><button class="btn btn-sm btn-soft" data-fill="admin">Use</button></div>
-          </div>
           <p class="auth-switch">New here? <a href="#/register">Create an account</a></p>
         </div>
       </div>`;
-    main.querySelectorAll('[data-fill]').forEach(b => b.addEventListener('click', () => {
-      const [e, p] = b.dataset.fill === 'demo' ? ['demo@eatsy.in', 'demo123'] : ['admin@eatsy.in', 'admin123'];
-      $('#lEmail').value = e; $('#lPass').value = p;
-    }));
     const go = async () => {
       try {
         const d = await API.post('/api/auth/login', { email: $('#lEmail').value, password: $('#lPass').value });

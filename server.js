@@ -8,18 +8,84 @@
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const helmet = require('helmet');
+const { rateLimit } = require('express-rate-limit');
 const { db, seed } = require('./db');
 
 const app = express();
-const PORT = process.env.PORT || 8430;
+const isProduction = process.env.NODE_ENV === 'production';
+const PORT = Number(process.env.PORT) || 3000;
+const SESSION_DAYS = 7;
+const CSRF_COOKIE = 'csrf';
+const COOKIE_SECURE = isProduction;
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || (isProduction ? '' : 'admin@eatsy.in')).trim().toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const DEMO_EMAIL = String(process.env.DEMO_EMAIL || '').trim().toLowerCase();
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD || '';
+
+if (isProduction && (!ADMIN_EMAIL || !ADMIN_PASSWORD)) {
+  throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD must be configured in production.');
+}
+
+if (isProduction) app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use(helmet({ contentSecurityPolicy: false }));
 
 app.use(express.json({ limit: '200kb' }));
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
 
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isProduction ? 20 : 100,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { ok: false, error: 'Too many authentication attempts. Please try again later.' }
+});
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isProduction ? 300 : 1000,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { ok: false, error: 'Too many admin requests. Please try again later.' }
+});
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/admin', adminLimiter);
+
+function cookieValue(req, name) {
+  const prefix = `${name}=`;
+  return (req.headers.cookie || '').split(';').map(s => s.trim())
+    .find(s => s.startsWith(prefix))?.slice(prefix.length) || '';
+}
+
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left));
+  const b = Buffer.from(String(right));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function csrfProtection(req, res, next) {
+  let token = cookieValue(req, CSRF_COOKIE);
+  if (!token) {
+    token = crypto.randomBytes(24).toString('hex');
+    res.cookie(CSRF_COOKIE, token, {
+      httpOnly: false, secure: COOKIE_SECURE, sameSite: 'lax',
+      maxAge: SESSION_DAYS * 864e5, path: '/'
+    });
+  }
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !safeEqual(token, req.get('x-csrf-token'))) {
+    return res.status(403).json({ ok: false, error: 'Invalid CSRF token.' });
+  }
+  next();
+}
+app.use('/api', csrfProtection);
+
 /* ============================================================
    Auth helpers — scrypt hashing, sessions, middleware
 ============================================================ */
-const SESSION_DAYS = 7;
+function sessionCookieOptions() {
+  return { httpOnly: true, secure: COOKIE_SECURE, sameSite: 'lax', maxAge: SESSION_DAYS * 864e5, path: '/' };
+}
 
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -42,7 +108,7 @@ function createSession(userId) {
 }
 
 function currentUser(req) {
-  const token = req.cookiesSid || (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('sid='))?.slice(4);
+  const token = req.cookiesSid || cookieValue(req, 'sid');
   if (!token) return null;
   const row = db.prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token = ? AND s.expires_at > ?`).get(token, new Date().toISOString());
@@ -148,15 +214,17 @@ function processPayment(method, data) {
 ============================================================ */
 app.post('/api/auth/register', (req, res) => {
   const { name, email, phone, password } = req.body || {};
-  if (!name || !email || !password) return res.status(422).json({ ok: false, error: 'Name, email and password are required.' });
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedName = String(name || '').trim();
+  if (!normalizedName || !normalizedEmail || !password) return res.status(422).json({ ok: false, error: 'Name, email and password are required.' });
   if (String(password).length < 6) return res.status(422).json({ ok: false, error: 'Password must be at least 6 characters.' });
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(422).json({ ok: false, error: 'Enter a valid email address.' });
-  if (db.prepare('SELECT id FROM users WHERE email = ?').get(email))
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return res.status(422).json({ ok: false, error: 'Enter a valid email address.' });
+  if (db.prepare('SELECT id FROM users WHERE lower(email) = ?').get(normalizedEmail))
     return res.status(409).json({ ok: false, error: 'An account with this email already exists.' });
   const info = db.prepare('INSERT INTO users (name, email, phone, password_hash) VALUES (?, ?, ?, ?)')
-    .run(name.trim(), email.trim().toLowerCase(), String(phone || ''), hashPassword(password));
+    .run(normalizedName, normalizedEmail, String(phone || '').trim(), hashPassword(password));
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
-  res.cookie('sid', createSession(user.id), { httpOnly: true, sameSite: 'lax', maxAge: SESSION_DAYS * 864e5, path: '/' });
+  res.cookie('sid', createSession(user.id), sessionCookieOptions());
   res.status(201).json({ ok: true, data: { user: publicUser(user) } });
 });
 
@@ -165,14 +233,14 @@ app.post('/api/auth/login', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email || '').trim().toLowerCase());
   if (!user || !verifyPassword(String(password || ''), user.password_hash))
     return res.status(401).json({ ok: false, error: 'Incorrect email or password.' });
-  res.cookie('sid', createSession(user.id), { httpOnly: true, sameSite: 'lax', maxAge: SESSION_DAYS * 864e5, path: '/' });
+  res.cookie('sid', createSession(user.id), sessionCookieOptions());
   res.json({ ok: true, data: { user: publicUser(user) } });
 });
 
 app.post('/api/auth/logout', (req, res) => {
-  const token = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('sid='))?.slice(4);
+  const token = cookieValue(req, 'sid');
   if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
-  res.clearCookie('sid', { path: '/' });
+  res.clearCookie('sid', { path: '/', secure: COOKIE_SECURE, sameSite: 'lax' });
   res.json({ ok: true, data: null });
 });
 
@@ -225,6 +293,7 @@ app.post('/api/orders', requireAuth, (req, res) => {
 
     const rest = db.prepare('SELECT * FROM restaurants WHERE id = ?').get(restaurantId);
     if (!rest) return res.status(404).json({ ok: false, error: 'Restaurant not found.' });
+    if (!rest.is_open) return res.status(422).json({ ok: false, error: 'This restaurant is currently closed.' });
 
     /* server-side price truth: never trust client prices */
     const lines = [];
@@ -237,6 +306,7 @@ app.post('/api/orders', requireAuth, (req, res) => {
       if (existing) existing.qty += qty; else lines.push({ itemId: mi.id, name: mi.name, price: mi.price, icon: mi.icon, veg: !!mi.veg, qty });
     }
     const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
+    if (subtotal < rest.min_order) return res.status(422).json({ ok: false, error: `Minimum order value is ₹${rest.min_order}.` });
     const tax = Math.round(subtotal * 0.05);           /* GST 5% */
     const total = subtotal + rest.delivery_fee + tax;
 
@@ -376,12 +446,17 @@ app.post('/api/admin/restaurants', requireAdmin, (req, res) => {
 app.put('/api/admin/restaurants/:id', requireAdmin, (req, res) => {
   const p = restPayload(req.body || {});
   if (!p.name || !p.cuisine) return res.status(422).json({ ok: false, error: 'Name and cuisine are required.' });
-  db.prepare(`UPDATE restaurants SET name=@name, cuisine=@cuisine, description=@description, image=@image,
+  const result = db.prepare(`UPDATE restaurants SET name=@name, cuisine=@cuisine, description=@description, image=@image,
     delivery_time=@delivery_time, delivery_fee=@delivery_fee, min_order=@min_order, rating=@rating,
     rating_count=@rating_count, is_open=@is_open WHERE id=@id`).run({ ...p, id: req.params.id });
+  if (!result.changes) return res.status(404).json({ ok: false, error: 'Restaurant not found.' });
   res.json({ ok: true, data: { id: Number(req.params.id) } });
 });
 app.delete('/api/admin/restaurants/:id', requireAdmin, (req, res) => {
+  const restaurant = db.prepare('SELECT id FROM restaurants WHERE id = ?').get(req.params.id);
+  if (!restaurant) return res.status(404).json({ ok: false, error: 'Restaurant not found.' });
+  const order = db.prepare('SELECT id FROM orders WHERE restaurant_id = ? LIMIT 1').get(req.params.id);
+  if (order) return res.status(409).json({ ok: false, error: 'This restaurant has order history and cannot be deleted.' });
   db.prepare('DELETE FROM restaurants WHERE id = ?').run(req.params.id);
   res.json({ ok: true, data: null });
 });
@@ -405,14 +480,16 @@ app.put('/api/admin/items/:id', requireAdmin, (req, res) => {
   const name = String(b.name || '').trim();
   const price = parseInt(b.price, 10);
   if (!name || !price || price <= 0) return res.status(422).json({ ok: false, error: 'Name and a valid price are required.' });
-  db.prepare(`UPDATE menu_items SET name=?, description=?, price=?, category=?, veg=?, icon=?, available=?, sort=?
+  const result = db.prepare(`UPDATE menu_items SET name=?, description=?, price=?, category=?, veg=?, icon=?, available=?, sort=?
     WHERE id=?`)
     .run(name, String(b.description || '').trim(), price, String(b.category || 'Main').trim(),
          b.veg ? 1 : 0, String(b.icon || '🍽️').trim(), b.available === false ? 0 : 1, parseInt(b.sort, 10) || 99, req.params.id);
+  if (!result.changes) return res.status(404).json({ ok: false, error: 'Menu item not found.' });
   res.json({ ok: true, data: { id: Number(req.params.id) } });
 });
 app.delete('/api/admin/items/:id', requireAdmin, (req, res) => {
-  db.prepare('DELETE FROM menu_items WHERE id = ?').run(req.params.id);
+  const result = db.prepare('DELETE FROM menu_items WHERE id = ?').run(req.params.id);
+  if (!result.changes) return res.status(404).json({ ok: false, error: 'Menu item not found.' });
   res.json({ ok: true, data: null });
 });
 
@@ -435,15 +512,19 @@ setInterval(tickOrders, 20000);
    Demo seed: accounts + historical orders
 ============================================================ */
 function seedAccounts() {
-  if (db.prepare("SELECT id FROM users WHERE email='admin@eatsy.in'").get()) return;
+  if (db.prepare('SELECT id FROM users WHERE lower(email) = ?').get(ADMIN_EMAIL)) return;
+  if (!ADMIN_PASSWORD) return false;
   const ins = db.prepare('INSERT INTO users (name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, ?)');
-  ins.run('Eatsy Admin', 'admin@eatsy.in', '+91 90000 00001', hashPassword('admin123'), 'admin');
-  ins.run('Demo Customer', 'demo@eatsy.in', '+91 90000 00002', hashPassword('demo123'), 'user');
+  ins.run('Eatsy Admin', ADMIN_EMAIL, '', hashPassword(ADMIN_PASSWORD), 'admin');
+  if (!isProduction && DEMO_EMAIL && DEMO_PASSWORD) {
+    ins.run('Demo Customer', DEMO_EMAIL, '+91 90000 00002', hashPassword(DEMO_PASSWORD), 'user');
+  }
 }
 
 function seedDemoOrders() {
   if (db.prepare('SELECT COUNT(*) c FROM orders').get().c > 0) return;
   const users = db.prepare("SELECT id FROM users WHERE role='user'").all();
+  if (!users.length) return;
   const rests = db.prepare('SELECT id, name, image, delivery_time, delivery_fee FROM restaurants').all();
   const itemsByRest = {};
   db.prepare('SELECT * FROM menu_items').all().forEach(i => {
@@ -494,9 +575,11 @@ function seedDemoOrders() {
   seedAll();
 }
 
-seed();            /* restaurants + menus first */
 seedAccounts();
-seedDemoOrders();
+if (!isProduction) {
+  seed();            /* restaurants + menus first */
+  seedDemoOrders();
+}
 
 /* ============================================================
    SPA fallback + boot
@@ -504,8 +587,15 @@ seedDemoOrders();
 app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.use((req, res) => res.status(404).json({ ok: false, error: 'Not found.' }));
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(err.status || 500).json({
+    ok: false,
+    error: isProduction ? 'Internal server error.' : (err.message || 'Internal server error.')
+  });
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🍽️  Eatsy running on http://0.0.0.0:${PORT}`);
-  console.log(`   Admin: admin@eatsy.in / admin123   |   Demo: demo@eatsy.in / demo123`);
+  console.log(`   Environment: ${isProduction ? 'production' : 'development'}`);
 });

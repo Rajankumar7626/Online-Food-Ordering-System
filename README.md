@@ -57,7 +57,7 @@ A full-stack food ordering platform built with **Node.js**, **Express**, and **S
 | **Backend** | Node.js (v18+), Express.js |
 | **Database** | SQLite (better-sqlite3 with WAL mode) |
 | **Frontend** | Vanilla JavaScript (no build step) |
-| **Authentication** | Scrypt hashing, JWT-style sessions |
+| **Authentication** | Scrypt hashing, database-backed sessions |
 | **Payment** | Mock gateway with validation |
 
 ---
@@ -77,13 +77,15 @@ cd food-ordering
 # 2. Install dependencies
 npm install
 
-# 3. Start the server
+# 3. Configure environment variables for production (see .env.example)
+
+# 4. Start the server
 npm start
 
 # Server runs on http://localhost:8430
 ```
 
-The database (`data/eatsy.db`) is **automatically created and seeded** on first boot with:
+In development, the database (`data/eatsy.db`) is **automatically created and seeded** on first boot with:
 - 6 restaurants with menus
 - 48 sample menu items
 - ~45 historical demo orders
@@ -91,14 +93,9 @@ The database (`data/eatsy.db`) is **automatically created and seeded** on first 
 
 ---
 
-## 👥 Demo Accounts
+## 👥 Development Accounts
 
-Quick access buttons available on login page:
-
-| Role | Email | Password |
-|------|-------|----------|
-| **Admin** | `admin@eatsy.in` | `admin123` |
-| **Customer** | `demo@eatsy.in` | `demo123` |
+Development mode can create accounts when `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `DEMO_EMAIL`, and `DEMO_PASSWORD` are configured. Production requires only `ADMIN_EMAIL` and `ADMIN_PASSWORD` and does not create demo accounts. Never reuse development credentials in production.
 
 ---
 
@@ -137,25 +134,26 @@ food-ordering/
 ### Restaurants
 - `GET /api/restaurants` — List all restaurants
 - `GET /api/restaurants/:id` — Get restaurant details
-- `POST /api/restaurants` — Create (Admin only)
-- `PUT /api/restaurants/:id` — Update (Admin only)
-- `DELETE /api/restaurants/:id` — Delete (Admin only)
+- `POST /api/admin/restaurants` — Create (Admin only)
+- `PUT /api/admin/restaurants/:id` — Update (Admin only)
+- `DELETE /api/admin/restaurants/:id` — Delete when no order history exists (Admin only)
 
 ### Menu Items
-- `GET /api/restaurants/:id/menu` — Get restaurant menu
-- `POST /api/menu` — Add menu item (Admin only)
-- `PUT /api/menu/:id` — Update menu item (Admin only)
-- `DELETE /api/menu/:id` — Delete menu item (Admin only)
+- Menu items are returned by `GET /api/restaurants/:id`
+- `POST /api/admin/restaurants/:id/items` — Add menu item (Admin only)
+- `PUT /api/admin/items/:id` — Update menu item (Admin only)
+- `DELETE /api/admin/items/:id` — Delete menu item (Admin only)
 
 ### Orders
-- `GET /api/orders` — Get user's orders
+- `GET /api/orders/mine` — Get the authenticated user's orders
 - `POST /api/orders` — Place new order
-- `GET /api/orders/:id` — Order details
-- `PATCH /api/orders/:id/status` — Update order status (Admin only)
-- `POST /api/orders/:id/cancel` — Cancel order
+- `GET /api/orders/:id` — Order details with ownership enforcement
+- `PATCH /api/admin/orders/:id/status` — Update order status (Admin only)
+- `POST /api/orders/:id/cancel` — Cancel an order while it is placed
 
 ### Dashboard (Admin)
-- `GET /api/admin/dashboard` — Analytics & metrics
+- `GET /api/admin/stats` — Analytics and metrics
+- `GET /api/admin/orders` — Order management list
 
 ---
 
@@ -174,10 +172,7 @@ food-ordering/
 - id, restaurant_id, name, description, price, category, is_veg, is_available, created_at
 
 ### Orders Table
-- id, user_id, restaurant_id, status, total, delivery_fee, payment_method, created_at, updated_at
-
-### Order Items Table
-- id, order_id, menu_item_id, quantity, price_at_order, created_at
+- id, order_no, user_id, restaurant_id, serialized items, totals, address, payment, status, history, created_at, updated_at
 
 ---
 
@@ -185,11 +180,37 @@ food-ordering/
 
 ✅ **Password Security**: Scrypt hashing with random salt
 ✅ **Session Management**: HTTPOnly cookies, automatic expiry
+✅ **CSRF Protection**: Double-submit token for state-changing API requests
+✅ **Security Headers**: Helmet security headers with SPA-compatible CSP handling
+✅ **Sensitive-route Rate Limits**: Login, registration, and admin API limits
 ✅ **Input Validation**: Server-side validation on all inputs
-✅ **CSRF Protection**: Token-based validation
 ✅ **SQL Injection Prevention**: Prepared statements (better-sqlite3)
 ✅ **Cart Validation**: Server-side cart integrity checks
 ✅ **Payment Validation**: Luhn algorithm, expiry verification
+
+## 🚀 Production Deployment
+
+This application uses SQLite and SQLite-backed sessions. Deploy it as a long-running Node.js service on a host with a persistent mounted volume, and set `SQLITE_PATH` to a file on that volume. Do not deploy the local SQLite file to a serverless platform such as Vercel and assume it will persist across instances. `better-sqlite3` also requires a compatible native build for the target Node runtime.
+
+### Render Web Service
+
+1. Create a Render **Web Service** from this repository.
+2. Set the build command to `npm install` and the start command to `npm start`.
+3. Add a Render Persistent Disk mounted at `/var/data`.
+4. Configure these environment variables in Render:
+
+```text
+NODE_ENV=production
+SQLITE_PATH=/var/data/food.db
+ADMIN_EMAIL=<your-admin-email>
+ADMIN_PASSWORD=<a-long-random-password>
+```
+
+Render supplies `PORT` automatically. Do not commit credentials or a production database. The service must remain a single instance unless the database is migrated to a shared external database.
+
+Set the variables in `.env.example` through the hosting provider's secret/configuration system. `.env` files are ignored by Git. Production startup requires `ADMIN_EMAIL` and `ADMIN_PASSWORD`; no development demo accounts are created in production.
+
+There are no uploads or media-write routes. Static images are served from `public/img`. Payments are simulated and must not be presented as real payment processing without a compliant gateway integration.
 
 ---
 
